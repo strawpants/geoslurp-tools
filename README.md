@@ -1,2 +1,4 @@
 # geoslurp-tools
-Collection of python tools to facilitate querying the geoslurp postgresql+postgis database
+Collection of python tools to facilitate querying the [Geoslurp postgresql+postgis database](https://github.com/strawpants/geoslurp)
+
+
