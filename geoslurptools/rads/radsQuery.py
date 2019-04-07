@@ -14,9 +14,6 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 # Author Roelof Rietbroek (roelof@geod.uni-bonn.de), 2019
-from datetime import datetime
-from sqlalchemy import text,cast
-from geoslurptools.aux.ogrgeom import lonlat2ogr
 from sqlalchemy import select,func,asc,and_,literal_column
 
 def radsQuery(dbcon, sattable, polyWKT,tspan=None,cycle=None):
