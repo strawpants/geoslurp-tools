@@ -19,6 +19,7 @@ from sqlalchemy import create_engine, MetaData, Table,select,and_
 from sqlalchemy.orm import sessionmaker
 import getpass 
 import keyring
+import os
 
 
 class geoslurpConnection:
@@ -29,6 +30,11 @@ class geoslurpConnection:
         if usekeyring:
             #try to retrieve the password using python keyring
             password=keyring.get_password("geoslurp",user)
+        else:
+            try:
+                password=os.environ["GEOSLURP_PGPASS"]
+            except KeyError:
+                pass
         
         if not password:
             password=getpass.getpass(prompt='Please enter geoslurp password for user %s: '%(user))
