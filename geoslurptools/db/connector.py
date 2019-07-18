@@ -15,7 +15,7 @@
 
 # Author Roelof Rietbroek (roelof@geod.uni-bonn.de), 2019
 
-from sqlalchemy import create_engine, MetaData, Table
+from sqlalchemy import create_engine, MetaData, Table,select,and_
 from sqlalchemy.orm import sessionmaker
 import getpass 
 import keyring
@@ -46,3 +46,13 @@ class geoslurpConnection:
     def getTable(self,tname,scheme):
         mdata=MetaData(bind=self.dbeng,schema=scheme)
         return Table(tname, mdata, autoload=True, autoload_with=self.dbeng)
+
+    def getInvent(self,tname,scheme):
+        mdata=MetaData(bind=self.dbeng,schema='admin')
+        tbl=Table('inventory', mdata, autoload=True, autoload_with=self.dbeng)
+        qry=select([tbl]).where(and_((tbl.c.scheme == scheme) & (tbl.c.dataset == tname)))
+        return self.dbeng.execute(qry).first()
+
+
+
+
