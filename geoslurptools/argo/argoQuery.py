@@ -16,23 +16,64 @@
 # Author Roelof Rietbroek (roelof@geod.uni-bonn.de), 2019
 from sqlalchemy import text
 # from geoslurptools.aux.ogrgeom import lonlat2ogr
-from sqlalchemy import select,func,asc,and_,literal_column
+from sqlalchemy import select,func,asc,and_,literal_column,between
+from geoalchemy2.functions import ST_Dump
+from geoslurptools.gis.shapelytools import shpextract
 
-def argoQuery(dbcon,geoWKT,tspan=None,withinDmeter=None):
-    tbl=dbcon.getTable('argo','oceanobs')
-    qry=select([tbl.c.uri, tbl.c.profnr,tbl.c.tprofile,literal_column('geom::geometry').label('geom')])
+def argoQuery(dbcon,geoWKT=None,tspan=None,withinDmeter=None,tsort=None):
+    tbl=dbcon.getTable('argo2','oceanobs')
+
+
+    #first create a subquery to quickly discard argo profiles
+
+
+    subqry=select([tbl])
     
     if tspan:
-        qry=qry.where(and_(tbl.c.tprofile > tspan[0],tbl.c.tprofile < tspan[1]))
+        subqry=subqry.where(func.overlaps(tbl.c.tstart,tbl.c.tend,tspan[0],tspan[1]))
+   
     
-    if withinDmeter:
-        qry=qry.where(func.ST_Dwithin(literal_column('geom'),func.ST_GeographyFromText(geoWKT),withinDmeter))
-    else:
-        qry=qry.where(func.ST_within(literal_column('geom::geometry'),func.ST_GeomFromText(geoWKT,4326)))
+    # Apply initial geospatial constraints 
+    if geoWKT:
+        if withinDmeter:
+            #only base initial constraints ont he bounding box
+            subqry=subqry.where(func.ST_DWithin(literal_column('ST_Envelope(geom::geometry)::geography'),func.ST_GeogFromText(geoWKT),withinDmeter))
+        else:
+            subqry=subqry.where(func.ST_Intersects(literal_column('geom::geometry'),func.ST_GeomFromText(geoWKT,4326)))
+    
+    
+    #we need to assign an alias to this subquery in order to work with it
+    subqry=subqry.alias("ar")
+    #expand the arrays and points int he subquery
+    qry=select([
+        subqry.c.wmoid,
+        subqry.c.uri,
+        subqry.c.datacenter,
+        func.unnest(subqry.c.mode).label('mode'),
+        func.unnest(subqry.c.ascend).label('ascend'),
+        func.unnest(subqry.c.tlocation).label('tlocation'),
+        func.unnest(subqry.c.cycle).label('cycle'),
+        func.unnest(subqry.c.iprof).label('iprof'),
+        ST_Dump(literal_column("ar.geom::geometry")).geom.label('geom')])
 
-    qry=qry.order_by(asc(tbl.c.tprofile))
+    #additional spatial constraints
+    finalqry=qry 
+    qry=qry.alias("arex")
+    
+    if tspan:
+        finalqry=select([qry]).where(between(qry.c.tlocation,tspan[0],tspan[1]))
 
-    return dbcon.dbeng.execute(qry)
+    if geoWKT:
+        if withinDmeter:
+            #only base initial constraints ont he bounding box
+            finalqry=finalqry.where(func.ST_DWithin(qry.c.geom,func.ST_GeogFromText(geoWKT),withinDmeter))
+        else:
+            finalqry=finalqry.where(func.ST_Within(literal_column("arex.geom"),func.ST_GeomFromText(geoWKT,4326)))
+
+    if tsort:
+        finalqry=finalqry.order_by(qry.c.tlocation)
+
+    return dbcon.dbeng.execute(finalqry)
 
 def queryMonthlyArgo(dbcon, geoWKT, tstart, tend):
     """Query the database for lists of monthly Argo profiles within a certain polygon and time span"""
@@ -40,14 +81,11 @@ def queryMonthlyArgo(dbcon, geoWKT, tstart, tend):
     # ogrpoly = lonlat2ogr(polygon)
     # import pdb;pdb.set_trace()
     out = {}
-    qry = text(
-        "SELECT uri,profnr,extract(year from tprofile) as year,extract(month from tprofile) as month, ST_X(geom::geometry) as lon,ST_Y(geom::geometry) as lat from oceanobs.argo where tprofile > '%s' and tprofile < '%s' and ST_within(geom::geometry,ST_GeomFromText('%s',4326)) ORDER BY tprofile ASC;" % (
-        tstart, tend, geoWKT))
 
-    # gather results in monthly batches
-    for uri, iprof, year, month, lon, lat in dbcon.dbeng.execute(qry):
-        epoch = (int(year), int(month))
-        tmpdict = {"uri": uri, "iprof": int(iprof), "lonlat": (lon, lat)}
+    for entry in argoQuery(dbcon,geoWKT=geoWKT,tspan=[tstart,tend],tsort=True):
+        epoch=(entry.tlocation.year,entry.tlocation.month)
+        pnt=shpextract(entry)
+        tmpdict = {"uri": entry.uri, "iprof": entry.iprof, "lonlat": (pnt.x, pnt.y)}
         if not epoch in out:
             out[epoch] = [tmpdict]
         else:
